@@ -10,22 +10,13 @@ impl Wire {
   fn update(&self, components: &[Point]) -> Source {
     let mut up: bool = false;
     let mut down: bool = false;
-    for point in self.inputs.iter() {
-      if let Some(signal) = components[*point] {
-        if signal {
-          up = true;
-        } else {
-          down = true;
-        }
+    for signal in self.inputs.iter().filter_map(|x|components[*x]) {
+      if signal {
+        up = true;
+      } else {
+        down = true;
       }
     }
-    // for signal in self.inputs.iter().filter_map(|x|components[*x]) {
-    //       if signal {
-    //         up = true;
-    //       } else {
-    //         down = true;
-    //       }
-    // }
     match (up, down) {
       (false, true) => false,
       (true, false) => true,
@@ -63,7 +54,7 @@ impl Component {
 }
 #[derive(Default)]
 pub struct WholeNew {
-  pub components: Vec<Component>,
+  pub components: Vec<(Component, Point)>,
   pub wires: Vec<Wire>,
 }
 #[derive(Debug)]
@@ -73,13 +64,12 @@ pub struct WholeNewState {
 }
 impl WholeNew {
   pub fn new_state(&self) -> WholeNewState {
-    WholeNewState {
-      wires: vec![false; self.wires.len()],
-      components: vec![None; self.components.len()],
-    }
+    let components: Vec<_> = self.components.iter().map(|(_,p)|p).cloned().collect();
+    let wires = self.wires.iter().map(|wire|wire.update(&components)).collect();
+    WholeNewState { wires, components }
   }
   pub fn update(&self, state: &mut WholeNewState) {
-    for (comp, out) in self.components.iter().zip(state.components.iter_mut()) {
+    for (comp, out) in self.components.iter().map(|(comp,_)|comp).zip(state.components.iter_mut()) {
       *out = comp.update(&state.wires);
     }
     for (wire, out) in self.wires.iter().zip(state.wires.iter_mut()) {

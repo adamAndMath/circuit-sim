@@ -19,7 +19,7 @@ impl Circuit {
       return Err(format!("Expected {} inputs, but recieved {}", self.inputs.len(), inputs.len()))
     }
     for (input, arg) in self.inputs.iter().zip(inputs) {
-      match &mut self.whole_new.components[*input] {
+      match &mut self.whole_new.components[*input].0 {
         Component::Source(v) => *v = arg,
         _ => return Err(format!("{} is not a source", input)),
       }
@@ -79,10 +79,10 @@ impl Circuit {
   }
 } */
 #[must_use]
-fn component(component: Component) -> impl FnOnce(&mut Circuit, usize) {
-  |circuit, o| {
+pub fn component(component: Component, default: Option<bool>) -> impl FnOnce(&mut Circuit, usize) {
+  move |circuit, o| {
     let id = circuit.whole_new.components.len();
-    circuit.whole_new.components.push(component);
+    circuit.whole_new.components.push((component, default));
     circuit.whole_new.wires[o].inputs.push(id);
   }
 }
@@ -90,7 +90,7 @@ fn component(component: Component) -> impl FnOnce(&mut Circuit, usize) {
 pub fn input(default: bool) -> impl FnOnce(&mut Circuit, usize) {
   move |circuit, o: usize| {
     let id = circuit.whole_new.components.len();
-    circuit.whole_new.components.push(Component::Source(default));
+    circuit.whole_new.components.push((Component::Source(default), Some(default)));
     circuit.whole_new.wires[o].inputs.push(id);
     circuit.inputs.push(id);
   }
@@ -101,35 +101,42 @@ pub fn output(i: usize) -> impl FnOnce(&mut Circuit) {
 }
 define! {
   pub fn buffer(i) -> (o) {
-    o = component(Component::Buffer(i));
+    o = component(Component::Buffer(i), Some(false));
   }
   pub fn inverter(i) -> (o) {
-    o = component(Component::Inverter(i));
+    o = component(Component::Inverter(i), Some(true));
   }
   pub fn or(i0, i1) -> (o) {
-    o = component(Component::Or(i0, i1));
+    o = component(Component::Or(i0, i1), Some(false));
   }
   pub fn and(i0, i1) -> (o) {
-    o = component(Component::And(i0, i1));
+    o = component(Component::And(i0, i1), Some(false));
   }
   pub fn nor(i0, i1) -> (o) {
-    o = component(Component::Nor(i0, i1));
+    o = component(Component::Nor(i0, i1), Some(true));
   }
   pub fn nand(i0, i1) -> (o) {
-    o = component(Component::Nand(i0, i1));
+    o = component(Component::Nand(i0, i1), Some(true));
   }
   fn snowflake(i0, i1) -> (o) {
-    o = component(Component::Snowflake(i0, i1));
+    o = component(Component::Snowflake(i0, i1), None);
+  }
+}
+
+pub fn clock(n: usize) -> impl FnOnce(&mut Circuit, usize) {
+  move |circuit, o| {
+    let mut wire = o;
+    for _ in 1..n {
+      let f = buffer(wire);
+      wire = circuit.add_wire();
+      f(circuit, wire);
+    }
+    inverter(wire)(circuit, o);
   }
 }
 
 define! {
-  pub fn tri_state(i, e) -> (o) {
-    let inv = inverter(i);
-    let pos = and(e, i);
-    let neg = and(e, inv);
-    o = snowflake(pos, neg);
-  }
+  //0
   pub fn xor(i0, i1) -> (o) {
     let nand = nand(i0, i1);
     let or = or(i0, i1);
@@ -140,13 +147,48 @@ define! {
     let nor = nor(i0, i1);
     o = or(and, nor);
   }
-  pub fn flip_flop(r, s) -> (q, qn) {
-    q = nor(r, qn);
+  pub fn bin_deco(i, e) -> (dir, inv) {
+    let not = inverter(i);
+    dir = and(e, i);
+    inv = and(e, not);
+  }
+  pub fn sr_latch(s, r) -> (q, qn) {
+    q = component(Component::Nor(r, qn), Some(false));
     qn = nor(s, q);
+  }
+  pub fn rising_edge(i) -> (o) {
+    let buf = buffer(i);
+    let inv = inverter(buf);
+    o = and(i, inv);
+  }
+  //1
+  pub fn tri_state(i, e) -> (o) {
+    let (dir, inv) = bin_deco(i, e);
+    o = snowflake(dir, inv);
+  }
+  pub fn d_latch(i, e) -> (q, qn) {
+    let (dir, inv) = bin_deco(i, e);
+    (q, qn) = sr_latch(dir, inv);
+  }
+  pub fn jk_latch(j, k, e) -> (q, qn) {
+    let s0 = and(qn, e);
+    let s = and(s0, j);
+    let r0 = and(q, e);
+    let r = and(r0, k);
+    (q, qn) = sr_latch(s, r);
   }
   pub fn half_adder(i0, i1) -> (s, c) {
     s = xor(i0, i1);
     c = and(i0, i1);
+  }
+  //2
+  pub fn d_flip_flop(i, clk) -> (q, qn) {
+    let e = rising_edge(clk);
+    (q, qn) = d_latch(i, e);
+  }
+  pub fn jk_flip_flop(j, k, clk) -> (q, qn) {
+    let e = rising_edge(clk);
+    (q, qn) = jk_latch(j, k, e);
   }
   pub fn full_adder(i0, i1, c_in) -> (s, c_out) {
     let (sum, c0) = half_adder(i0, i1);
@@ -154,4 +196,5 @@ define! {
     s = xor(sum, c_in);
     c_out = and(c0, c1);
   }
+  //3
 }

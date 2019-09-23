@@ -35,9 +35,10 @@ fn run_command(circuit: &mut Circuit, state: &mut WholeNewState, cmd: &str, args
 fn main() {
   let mut circuit = Circuit::default();
   circuit! { &mut circuit;
-    let reset = input(false);
-    let set = input(true);
-    let (q, qn) = flip_flop(reset, set);
+    let clk = clock(5);
+    let j = input(false);
+    let k = input(false);
+    let (q, qn) = jk_flip_flop(j, k, clk);
     output(q);
     output(qn);
   }
