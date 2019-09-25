@@ -19,8 +19,8 @@ macro_rules! define {
 
 #[macro_export]
 macro_rules! circuit {
-  ($self:expr; $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
-    $($func)::+($($p)*)($self);
+  ($self:expr; let $w:ident; $($tt:tt)*) => {
+    let $w = $self.add_wire();
     $crate::circuit!($self; $($tt)*);
   };
   ($self:expr; $o:ident = $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
@@ -31,6 +31,10 @@ macro_rules! circuit {
     $crate::circuit!($self; let ($o) = $($func)::+($($p)*););
     $crate::circuit!($self; $($tt)*);
   };
+  ($self:expr; let ($($w:ident),*); $($tt:tt)*) => {
+    $(let $w = $self.add_wire();)*
+    $crate::circuit!($self; $($tt)*);
+  };
   ($self:expr; ($($o:ident),*) = $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
     $($func)::+($($p)*)($self $(,$o)*);
     $crate::circuit!($self; $($tt)*);
@@ -39,6 +43,10 @@ macro_rules! circuit {
     let f = $($func)::+($($p)*);
     $(let $o = $self.add_wire();)*
     f($self $(,$o)*);
+    $crate::circuit!($self; $($tt)*);
+  };
+  ($self:expr; $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
+    $($func)::+($($p)*)($self);
     $crate::circuit!($self; $($tt)*);
   };
   ($self:expr;) => {};
