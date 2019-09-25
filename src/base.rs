@@ -1,4 +1,6 @@
 use rand::Rng;
+use std::path::Path;
+use std::fs::{ read_to_string, write };
 
 type Source = bool;
 type Point = Option<bool>;
@@ -75,5 +77,19 @@ impl WholeNew {
     for (wire, out) in self.wires.iter().zip(state.wires.iter_mut()) {
       *out = wire.update(&state.components);
     }
+  }
+}
+impl WholeNewState {
+  pub fn save<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+    write(path, self.wires.iter().map(|b|if *b { b'1' } else { b'0' }).collect::<Vec<_>>())
+  }
+  pub fn load<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
+    let file = read_to_string(path)?;
+    if file.len() != self.wires.len() {
+      panic!();
+    }
+    self.components.iter_mut().for_each(|comp|*comp = None);
+    self.wires.iter_mut().zip(file.chars().map(|c|match c { '1' => true, '0' => false, _ => panic!() })).for_each(|(wire, val)|*wire = val);
+    Ok(())
   }
 }
