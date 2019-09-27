@@ -1,0 +1,29 @@
+WHITESPACE = _{ " " | NEWLINE }
+COMMENT = _{ ("//" ~ (!NEWLINE)) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
+
+bool = @{ "0" | "1" }
+ident = @{ !("let" ~ !(ASCII_ALPHANUMERIC | "_")) ~ (("_"+ ~ ASCII_ALPHANUMERIC) | ASCII_ALPHA) ~ (ASCII_ALPHANUMERIC | "_")* }
+pat_ident = { ident | "_" }
+pattern = { pat_ident | ("(" ~ pat_ident ~ ("," ~ pat_ident)* ~ ")") }
+
+state_ast = _{ bool | ident | state_not }
+state_not = { "!" ~ state_ast }
+
+ast = _{ bool | ast_call | ident }
+ast_call = { ident ~ call_state ~ "(" ~ (ast ~ ("," ~ ast)*)? ~ ")" }
+call_state = { call_state_? }
+call_state_ = { "[" ~ (state_ast ~ ("," ~ state_ast)*)? ~ "]" }
+
+stmt = _{ (stmt_let | stmt_float | stmt_set | ast) ~ ";" }
+stmt_float = { "let" ~ (ident | ("(" ~ (ident ~ ("," ~ ident)*)? ~ ")")) }
+stmt_let = { "let" ~ pattern ~ "=" ~ ast }
+stmt_set = { pattern ~ "=" ~ ast }
+
+state_def = { ident ~ "=" ~ bool }
+
+func = { ident ~ state ~ input ~ output ~ "{" ~ stmt* ~ "}" }
+state = { ("[" ~ (state_def ~ ("," ~ state_def)*)? ~ "]")? }
+input = { "(" ~ (ident ~ ("," ~ ident)*)? ~ ")" }
+output = { ("->" ~ (ident | ("(" ~ (ident ~ ("," ~ ident)*)? ~ ")")))? }
+
+file = _{ SOI ~ func* ~ EOI }

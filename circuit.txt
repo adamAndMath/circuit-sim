@@ -1,0 +1,56 @@
+and3(a, b, c) -> o {
+    o = and(and(a, b), c);
+}
+
+xor(a, b) -> o {
+    o = and(nand(a, b), or(a, b));
+}
+
+xnor(a, b) -> o {
+    o = or(and(a, b), nor(a, b));
+}
+
+rising_edge(i) -> o {
+    o = and(i, buffer(not(i)));
+}
+
+bin_decode(i, e) -> (h, l) {
+    h = and(e, i);
+    l = and(e, not(i));
+}
+
+tri_state(bus, i, e) {
+    bus_input(bus, bin_decode(i, e));
+}
+
+sr_latch[b=0](s, r) -> (q, qn) {
+    q = nor[b](r, qn);
+    qn = nor[!b](s, q);
+}
+
+d_latch[b=0](d, e) -> (q, qn) {
+    (q, qn) = sr_latch[b](bin_decode(d, e));
+}
+
+jk_latch[b=0](j, k, e) -> (q, qn) {
+    (q, qn) = sr_latch[b](and3(e, j, qn), and3(e, k, q));
+}
+
+d_flip_flop[b=0](d, clk) -> (q, qn) {
+    (q, qn) = d_latch[b](d, rising_edge(clk));
+}
+
+jk_flip_flop[b=0](j, k, clk) -> (q, qn) {
+    (q, qn) = jk_latch[b](j, k, clk);
+}
+
+half_adder(a, b) -> (s, c) {
+    s = xor(a, b);
+    c = and(a, b);
+}
+
+full_adder(a, b, c_in) -> (s, c_out) {
+    let (sum, c0) = half_adder(a, b);
+    s = xor(sum, c_in);
+    c_out = or(c0, and(sum, c_in));
+}
