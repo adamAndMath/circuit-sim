@@ -1,13 +1,56 @@
-use crate::base::{Component, WholeNew, WholeNewState, Wire};
+use crate::base::{Data, Component, WholeNew, WholeNewState};
+use crate::slot_vec::SlotVec;
 
-#[derive(Default)]
-pub struct Circuit {
-  whole_new: WholeNew,
+pub struct Builder {
+  components: SlotVec<(Component, Data)>,
   inputs: Vec<usize>,
   outputs: Vec<usize>,
 }
 
+impl Builder {
+  pub fn new_slot(&mut self) -> usize {
+    self.components.new_slot()
+  }
+  pub fn place_component(&mut self, slot: usize, component: Component, default: bool) {
+    self.components.fill_slot(slot, (component, default));
+  }
+  pub fn add_input(&mut self, slot: usize, default: bool) {
+    self.place_component(slot, Component::Source(default), default);
+    self.inputs.push(slot);
+  }
+  pub fn add_output(&mut self, index: usize) {
+    self.outputs.push(index)
+  }
+  pub fn add_bus_input(&mut self, bus: usize, high: usize, low: usize) {
+    match &mut self.components[bus] {
+      (Component::Bus(inputs), _) => inputs.push((high, low)),
+      _ => panic!("Not a bus"),
+    }
+  }
+  pub fn build(self) -> Circuit {
+    Circuit {
+      whole_new: WholeNew { components: self.components.build() },
+      inputs: self.inputs.into_boxed_slice(),
+      outputs: self.outputs.into_boxed_slice(),
+    }
+  }
+}
+
+#[derive(Debug)]
+pub struct Circuit {
+  whole_new: WholeNew,
+  inputs: Box<[usize]>,
+  outputs: Box<[usize]>,
+}
+
 impl Circuit {
+  pub fn builder() -> Builder {
+    Builder {
+      components: SlotVec::new(),
+      inputs: Vec::new(),
+      outputs: Vec::new(),
+    }
+  }
   pub fn new_state(&mut self) -> WholeNewState {
     self.whole_new.new_state()
   }
@@ -27,108 +70,56 @@ impl Circuit {
     Ok(())
   }
   pub fn print_output(&self, state: &WholeNewState) {
-    self.outputs.iter().copied().map(|i|state.wires[i]).for_each(|b|if b { print!("1") } else { print!("0") });
+    self.outputs.iter().copied().map(|i|state.components[i]).for_each(|b|if b { print!("1") } else { print!("0") });
     println!();
   }
-  pub fn add_wire(&mut self) -> usize {
-    let id = self.whole_new.wires.len();
-    self.whole_new.wires.push(Wire::default());
-    id
-  }
-}
-/* impl Circuit {
-  pub fn tri_state(&mut self, i: usize, e: usize, o: usize) {
-    let inv = self.add_wire();
-    let pos = self.add_wire();
-    let neg = self.add_wire();
-    self.inverter(i, inv);
-    self.and(e, i, pos);
-    self.and(e, inv, neg);
-    self.snowflake(pos, neg, o);
-  }
-  pub fn xor(&mut self, i0: usize, i1: usize, o: usize) {
-    let nand = self.add_wire();
-    let or = self.add_wire();
-    self.nand(i0, i1, nand);
-    self.or(i0, i1, or);
-    self.and(nand, or, o);
-  }
-  pub fn xnor(&mut self, i0: usize, i1: usize, o: usize) {
-    let and = self.add_wire();
-    let nor = self.add_wire();
-    self.and(i0, i1, and);
-    self.nor(i0, i1, nor);
-    self.or(and, nor, o);
-  }
-  pub fn flip_flop(&mut self, r: usize, s: usize, q: usize, qn: usize) {
-    self.nor(r, qn, q);
-    self.nor(s, q, qn);
-  }
-  pub fn half_adder(&mut self, i0: usize, i1: usize, s: usize, c: usize) {
-    self.xor(i0, i1, s);
-    self.and(i0, i1, c);
-  }
-  pub fn full_adder(&mut self, i0: usize, i1: usize, c_in: usize, s: usize, c_out: usize) {
-    let sum = self.add_wire();
-    let c0 = self.add_wire();
-    let c1 = self.add_wire();
-    self.half_adder(i0, i1, sum, c0);
-    self.xor(sum, c_in, s);
-    self.and(sum, c_in, c1);
-    self.and(c0, c1, c_out);
-  }
-} */
-#[must_use]
-pub fn component(component: Component, default: Option<bool>) -> impl FnOnce(&mut Circuit, usize) {
-  move |circuit, o| {
-    let id = circuit.whole_new.components.len();
-    circuit.whole_new.components.push((component, default));
-    circuit.whole_new.wires[o].inputs.push(id);
-  }
 }
 #[must_use]
-pub fn input(default: bool) -> impl FnOnce(&mut Circuit, usize) {
-  move |circuit, o: usize| {
-    let id = circuit.whole_new.components.len();
-    circuit.whole_new.components.push((Component::Source(default), Some(default)));
-    circuit.whole_new.wires[o].inputs.push(id);
-    circuit.inputs.push(id);
-  }
+pub fn component(component: Component, default: bool) -> impl FnOnce(&mut Builder, usize) {
+  move |circuit, o| circuit.place_component(o, component, default)
 }
 #[must_use]
-pub fn output(i: usize) -> impl FnOnce(&mut Circuit) {
-  move |circuit| { circuit.outputs.push(i) }
+pub fn input(default: bool) -> impl FnOnce(&mut Builder, usize) {
+  move |circuit, o| circuit.add_input(o, default)
+}
+#[must_use]
+pub fn output(i: usize) -> impl FnOnce(&mut Builder) {
+  move |circuit| circuit.add_output(i)
+}
+#[must_use]
+pub fn bus_input(bus: usize, high: usize, low: usize) -> impl FnOnce(&mut Builder) {
+  move |circuit| circuit.add_bus_input(bus, high, low)
 }
 define! {
   pub fn buffer(i) -> (o) {
-    o = component(Component::Buffer(i), Some(false));
+    o = component(Component::Buffer(i), false);
   }
   pub fn inverter(i) -> (o) {
-    o = component(Component::Inverter(i), Some(true));
+    o = component(Component::Inverter(i), true);
   }
   pub fn or(i0, i1) -> (o) {
-    o = component(Component::Or(i0, i1), Some(false));
+    o = component(Component::Or(i0, i1), false);
   }
   pub fn and(i0, i1) -> (o) {
-    o = component(Component::And(i0, i1), Some(false));
+    o = component(Component::And(i0, i1), false);
   }
   pub fn nor(i0, i1) -> (o) {
-    o = component(Component::Nor(i0, i1), Some(true));
+    o = component(Component::Nor(i0, i1), true);
   }
   pub fn nand(i0, i1) -> (o) {
-    o = component(Component::Nand(i0, i1), Some(true));
+    o = component(Component::Nand(i0, i1), true);
   }
-  fn snowflake(i0, i1) -> (o) {
-    o = component(Component::Snowflake(i0, i1), None);
+  fn bus() -> (o) {
+    o = component(Component::Bus(vec![]), false);
   }
 }
 
-pub fn clock(n: usize) -> impl FnOnce(&mut Circuit, usize) {
+pub fn clock(n: usize) -> impl FnOnce(&mut Builder, usize) {
   move |circuit, o| {
     let mut wire = o;
     for _ in 1..n {
       let f = buffer(wire);
-      wire = circuit.add_wire();
+      wire = circuit.new_slot();
       f(circuit, wire);
     }
     inverter(wire)(circuit, o);
@@ -159,7 +150,7 @@ define! {
     inv = and(e, not);
   }
   pub fn sr_latch(s, r) -> (q, qn) {
-    q = component(Component::Nor(r, qn), Some(false));
+    q = component(Component::Nor(r, qn), false);
     qn = nor(s, q);
   }
   pub fn rising_edge(i) -> (o) {
@@ -168,9 +159,9 @@ define! {
     o = and(i, inv);
   }
   //2
-  pub fn tri_state(i, e) -> (o) {
+  pub fn tri_state(i, e, bus) -> () {
     let (dir, inv) = bin_deco(i, e);
-    o = snowflake(dir, inv);
+    bus_input(bus, dir, inv);
   }
   pub fn d_latch(i, e) -> (q, qn) {
     let (dir, inv) = bin_deco(i, e);
@@ -224,15 +215,15 @@ define! {
     (o6, n6) = d_latch(i6, e);
     (o7, n7) = d_latch(i7, e);
   }
-  pub fn tri_state8(i0, i1, i2, i3, i4, i5, i6, i7, e) -> (o0, o1, o2, o3, o4, o5, o6, o7) {
-    o0 = tri_state(i0, e);
-    o1 = tri_state(i1, e);
-    o2 = tri_state(i2, e);
-    o3 = tri_state(i3, e);
-    o4 = tri_state(i4, e);
-    o5 = tri_state(i5, e);
-    o6 = tri_state(i6, e);
-    o7 = tri_state(i7, e);
+  pub fn tri_state8(i0, i1, i2, i3, i4, i5, i6, i7, e, bus0, bus1, bus2, bus3, bus4, bus5, bus6, bus7) -> () {
+    tri_state(i0, e, bus0);
+    tri_state(i1, e, bus1);
+    tri_state(i2, e, bus2);
+    tri_state(i3, e, bus3);
+    tri_state(i4, e, bus4);
+    tri_state(i5, e, bus5);
+    tri_state(i6, e, bus6);
+    tri_state(i7, e, bus7);
   }
   //4
   pub fn full_adder8(a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7, c_in) -> (o0, o1, o2, o3, o4, o5, o6, o7, c_out) {
@@ -247,9 +238,9 @@ define! {
     (o7, c_out) = full_adder(a7, b7, c6);
   }
   //5
-  pub fn ALU(a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7, sign, e) -> (o0, o1, o2, o3, o4, o5, o6, o7) {
+  pub fn ALU(a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7, sign, e, bus0, bus1, bus2, bus3, bus4, bus5, bus6, bus7) -> () {
     let (b0, b1, b2, b3, b4, b5, b6, b7) = inverter8(b0, b1, b2, b3, b4, b5, b6, b7, sign);
     let (c0, c1, c2, c3, c4, c5, c6, c7, c_out) = full_adder8(a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7, sign);
-    (o0, o1, o2, o3, o4, o5, o6, o7) = tri_state8(c0, c1, c2, c3, c4, c5, c6, c7, e);
+    tri_state8(c0, c1, c2, c3, c4, c5, c6, c7, e, bus0, bus1, bus2, bus3, bus4, bus5, bus6, bus7);
   }
 }

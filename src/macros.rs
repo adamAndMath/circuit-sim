@@ -9,7 +9,7 @@ macro_rules! replace {
 macro_rules! define {
   ($($vis:vis fn $func:ident($($p:ident),*) -> ($($o:ident),*) {$($tt:tt)*})*) => {$(
     #[must_use]
-    $vis fn $func($($p: usize),*) -> impl FnOnce(&mut $crate::circuit::Circuit $(,$crate::replace!(($o); usize))*) {
+    $vis fn $func($($p: usize),*) -> impl FnOnce(&mut $crate::circuit::Builder $(,$crate::replace!(($o); usize))*) {
       move |circuit, $($o),*| {
         $crate::circuit!(circuit; $($tt)*);
       }
@@ -20,7 +20,7 @@ macro_rules! define {
 #[macro_export]
 macro_rules! circuit {
   ($self:expr; let $w:ident; $($tt:tt)*) => {
-    let $w = $self.add_wire();
+    $crate::circuit!($self; let ($w););
     $crate::circuit!($self; $($tt)*);
   };
   ($self:expr; $o:ident = $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
@@ -32,7 +32,7 @@ macro_rules! circuit {
     $crate::circuit!($self; $($tt)*);
   };
   ($self:expr; let ($($w:ident),*); $($tt:tt)*) => {
-    $(let $w = $self.add_wire();)*
+    $(let $w = $self.new_slot();)*
     $crate::circuit!($self; $($tt)*);
   };
   ($self:expr; ($($o:ident),*) = $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
@@ -41,7 +41,7 @@ macro_rules! circuit {
   };
   ($self:expr; let ($($o:ident),*) = $($func:ident)::+($($p:tt)*); $($tt:tt)*) => {
     let f = $($func)::+($($p)*);
-    $(let $o = $self.add_wire();)*
+    $(let $o = $self.new_slot();)*
     f($self $(,$o)*);
     $crate::circuit!($self; $($tt)*);
   };
