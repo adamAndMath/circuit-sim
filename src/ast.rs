@@ -5,6 +5,7 @@ use std::convert::TryInto;
 use std::fmt::{ self, Display, Formatter };
 
 mod parser;
+pub mod mir;
 
 pub fn parse(s: &str) -> Result<Env<Func>, String> {
     parser::parse(s).map(|iter|vec![
