@@ -22,37 +22,43 @@ impl StateAst {
 }
 
 impl Ast {
-    fn lower_to(self, stmts: &mut Vec<mir::Stmt>, wire_count: &mut usize, output: Vec<usize>, funcs: &Env<(usize, usize)>, states: &Env<usize>, wires: &Env<usize>) {
+    fn lower_to(self, stmts: &mut Vec<mir::Stmt>, wire_count: &mut usize, output: Vec<usize>, funcs: &Env<mir::FuncSign>, states: &Env<usize>, wires: &Env<usize>) {
         match self {
             Ast::Source(b) => {
                 let [output]: [usize; 1] = output.as_slice().try_into().unwrap();
-                stmts.push(mir::Stmt { func: 0, state: Some(vec![mir::StateAst { negate: false, state: mir::StateRef::Const(b) }]), input: vec![], output: vec![output] });
+                stmts.push(mir::Stmt { func: 0, state: vec![mir::StateAst { negate: false, state: mir::StateRef::Const(b) }], input: vec![], output: vec![output] });
             },
             Ast::Wire(_) => panic!("Can't connect 2 wires"),
             Ast::Call(func, state, param) => {
-                let (func, _) = funcs[&func];
-                let state = state.map(|v|v.into_iter().map(|s|s.lower(states)).collect());
+                let func = &funcs[&func];
+                let state: Vec<_> = match state {
+                    None => func.state.iter().map(|b|mir::StateAst { negate: false, state: mir::StateRef::Const(*b) }).collect(), 
+                    Some(v) => v.into_iter().map(|s|s.lower(states)).collect(),
+                };
                 let input = param.into_iter().flat_map(|ast|ast.lower(stmts, wire_count, funcs, states, wires)).collect();
-                stmts.push(mir::Stmt { func, state, input, output })
+                stmts.push(mir::Stmt { func: func.id, state, input, output })
             },
         }
     }
-    fn lower(self, stmts: &mut Vec<mir::Stmt>, wire_count: &mut usize, funcs: &Env<(usize, usize)>, states: &Env<usize>, wires: &Env<usize>) -> Vec<usize> {
+    fn lower(self, stmts: &mut Vec<mir::Stmt>, wire_count: &mut usize, funcs: &Env<mir::FuncSign>, states: &Env<usize>, wires: &Env<usize>) -> Vec<usize> {
         match self {
             Ast::Source(b) => {
                 let output = *wire_count;
                 *wire_count += 1;
-                stmts.push(mir::Stmt { func: 0, state: Some(vec![mir::StateAst { negate: false, state: mir::StateRef::Const(b) }]), input: vec![], output: vec![output] });
+                stmts.push(mir::Stmt { func: 0, state: vec![mir::StateAst { negate: false, state: mir::StateRef::Const(b) }], input: vec![], output: vec![output] });
                 vec![output]
             },
             Ast::Wire(i) => vec![wires[&i]],
             Ast::Call(func, state, param) => {
-                let (func, out) = funcs[&func];
-                let state = state.map(|v|v.into_iter().map(|s|s.lower(states)).collect());
+                let func = &funcs[&func];
+                let state: Vec<_> = match state {
+                    None => func.state.iter().map(|b|mir::StateAst { negate: false, state: mir::StateRef::Const(*b) }).collect(), 
+                    Some(v) => v.into_iter().map(|s|s.lower(states)).collect(),
+                };
                 let input = param.into_iter().flat_map(|ast|ast.lower(stmts, wire_count, funcs, states, wires)).collect();
-                let output = (*wire_count..*wire_count+out).collect::<Vec<_>>();
-                *wire_count += out;
-                stmts.push(mir::Stmt { func, state, input, output: output.clone() });
+                let output = (*wire_count..*wire_count+func.output).collect::<Vec<_>>();
+                *wire_count += func.output;
+                stmts.push(mir::Stmt { func: func.id, state, input, output: output.clone() });
                 output
             },
         }
@@ -60,7 +66,7 @@ impl Ast {
 }
 
 impl Stmt {
-    fn lower(self, stmts: &mut Vec<mir::Stmt>, wire_count: &mut usize, funcs: &Env<(usize, usize)>, states: &Env<usize>, wires: &mut Env<usize>) {
+    fn lower(self, stmts: &mut Vec<mir::Stmt>, wire_count: &mut usize, funcs: &Env<mir::FuncSign>, states: &Env<usize>, wires: &mut Env<usize>) {
         match self {
             Stmt::Float(vec) => {
                 let count = vec.len();
@@ -90,20 +96,28 @@ impl Stmt {
 }
 
 impl Func {
-    pub fn lower(self, funcs: &Env<(usize, usize)>) -> mir::Func {
-        let (state, states) = self.state.into_iter().enumerate().map(|(i, (s, v))|(v, (s, i))).unzip();
+    pub fn lower(self, funcs: &Env<mir::FuncSign>, id: usize) -> (mir::FuncSign, mir::Func) {
+        let state = self.state.len();
+        let (sign_state, states) = self.state.into_iter().enumerate().map(|(i, (s, v))|(v, (s, i))).unzip();
         let input_count = self.input.len();
         let output_count = self.output.len();
         let mut wire_count = self.input.len() + self.output.len();
         let mut wires = self.input.into_iter().chain(self.output).enumerate().map(|(i, s)|(s, i)).collect();
         let mut func_stmts = vec![];
         self.stmts.into_iter().for_each(|stmt|stmt.lower(&mut func_stmts, &mut wire_count, funcs, &states, &mut wires));
-        mir::Func::Custom {
-            state,
-            input: input_count,
-            output: output_count,
-            local: wire_count - input_count - output_count,
-            stmts: func_stmts,
-        }
+        (
+            mir::FuncSign {
+                id,
+                state: sign_state,
+                output: output_count,
+            },
+            mir::Func::Custom {
+                state,
+                input: input_count,
+                output: output_count,
+                local: wire_count - input_count - output_count,
+                stmts: func_stmts,
+            }
+        )
     }
 }
