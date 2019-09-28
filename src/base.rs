@@ -69,9 +69,9 @@ impl WholeNewState {
   pub fn load<P: AsRef<Path>>(&mut self, path: P) -> std::io::Result<()> {
     let file = read_to_string(path)?;
     if file.len() != self.components.len() {
-      panic!();
+      panic!("The file contains a {} bit state, but this circuit uses a {} bit state.", file.len(), self.components.len());
     }
-    self.components.iter_mut().zip(file.chars().map(|c|match c { '1' => true, '0' => false, _ => panic!() })).for_each(|(wire, val)|*wire = val);
+    self.components.iter_mut().zip(file.chars().map(|c|match c { '1' => true, '0' => false, c => panic!("'{}' is not a valid bit value.", c) })).for_each(|(wire, val)|*wire = val);
     self.old_components.copy_from_slice(&self.components);
     Ok(())
   }

@@ -18,8 +18,8 @@ impl<T> Default for Env<T> {
 
 impl<T> Env<T> {
     pub fn insert(&mut self, key: String, val: T) {
-        if self.map.insert(key, val).is_some() {
-            panic!();
+        if self.map.insert(key.clone(), val).is_some() {
+            panic!("Duplicate key: {}", key);
         }
     }
 }
