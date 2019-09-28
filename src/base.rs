@@ -3,7 +3,6 @@ use std::path::Path;
 use std::fs::{ read_to_string, write };
 
 pub type Data = bool;
-type ID = usize;
 #[derive(Debug)]
 pub enum Component {
   Source(Data),

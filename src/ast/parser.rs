@@ -2,7 +2,6 @@ use super::hir::{ StateAst, Ast, Stmt, Func };
 use pest_derive::Parser;
 use pest::Parser;
 type Pair<'i> = pest::iterators::Pair<'i, Rule>;
-type Pairs<'i> = pest::iterators::Pairs<'i, Rule>;
 
 #[derive(Parser)]
 #[grammar = "ast/cir.pest"]

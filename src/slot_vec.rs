@@ -1,5 +1,6 @@
 use std::ops::{ Index, IndexMut };
 
+#[derive(Default)]
 pub struct SlotVec<T> {
     vec: Vec<Option<T>>,
 }
