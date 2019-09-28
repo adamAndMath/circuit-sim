@@ -1,5 +1,5 @@
 WHITESPACE = _{ " " | NEWLINE }
-COMMENT = _{ ("//" ~ (!NEWLINE)) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
+COMMENT = _{ ("//" ~ (!(NEWLINE | EOI) ~ ANY)* ~ (NEWLINE | EOI)) | ("/*" ~ (!"*/" ~ ANY)* ~ "*/") }
 
 bool = @{ "0" | "1" }
 ident = @{ !("let" ~ !(ASCII_ALPHANUMERIC | "_")) ~ (("_"+ ~ ASCII_ALPHANUMERIC) | ASCII_ALPHA) ~ (ASCII_ALPHANUMERIC | "_")* }
