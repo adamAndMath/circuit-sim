@@ -1,5 +1,5 @@
 use crate::env::Env;
-use super::{ parser, hir, write_iter };
+use super::{ parser, write_iter };
 use circuit_sim::circuit::{ Circuit, Builder };
 use circuit_sim::base::Component;
 use std::convert::TryInto;
@@ -20,8 +20,8 @@ pub fn parse(s: &str) -> Result<(Vec<Func>, Env<(usize, usize)>), String> {
     ].into_iter().collect();
     let mut funcs = vec![Func::Source, Func::Buffer, Func::Inverter, Func::Or, Func::And, Func::Nor, Func::Nand, Func::Bus, Func::BusInput];
     for (name, func) in iter {
-        let output = func.output();
-        let func = func.lower(&mut env);
+        let output = func.output.len();
+        let func = func.lower(&env);
         println!("{}{}", name, func);
         env.insert(name, (funcs.len(), output));
         funcs.push(func);
@@ -29,21 +29,21 @@ pub fn parse(s: &str) -> Result<(Vec<Func>, Env<(usize, usize)>), String> {
     Ok((funcs, env))
 }
 
-enum StateRef {
+pub enum StateRef {
     Const(bool),
     Ident(usize),
 }
 
-struct StateAst {
-    negate: bool,
-    state: StateRef,
+pub struct StateAst {
+    pub negate: bool,
+    pub state: StateRef,
 }
 
-struct Stmt {
-    func: usize,
-    state: Option<Vec<StateAst>>,
-    input: Vec<usize>,
-    output: Vec<usize>,
+pub struct Stmt {
+    pub func: usize,
+    pub state: Option<Vec<StateAst>>,
+    pub input: Vec<usize>,
+    pub output: Vec<usize>,
 }
 
 pub enum Func {
@@ -113,123 +113,6 @@ impl Display for Func {
                 write!(f, "}}")
             },
             _ => Ok(()),
-        }
-    }
-}
-
-impl hir::StateAst {
-    fn lower(self, states: &Env<usize>) -> StateAst {
-        let mut negate = false;
-        let mut ast = self;
-        let state = loop {
-            ast = match ast {
-                hir::StateAst::Const(b) => break StateRef::Const(b),
-                hir::StateAst::Ident(i) => break StateRef::Ident(states[&i]),
-                hir::StateAst::Not(inner) => {
-                    negate = !negate;
-                    *inner
-                },
-            }
-        };
-        StateAst { negate, state }
-    }
-}
-
-impl hir::Ast {
-    fn lower_to(self, stmts: &mut Vec<Stmt>, wire_count: &mut usize, output: Vec<usize>, funcs: &Env<(usize, usize)>, states: &Env<usize>, wires: &Env<usize>) {
-        match self {
-            hir::Ast::Source(b) => {
-                let [output]: [usize; 1] = output.as_slice().try_into().unwrap();
-                stmts.push(Stmt { func: 0, state: Some(vec![StateAst { negate: false, state: StateRef::Const(b) }]), input: vec![], output: vec![output] });
-            },
-            hir::Ast::Wire(i) => panic!("Can't connect 2 wires"),
-            hir::Ast::Call(func, state, param) => {
-                let (func, _) = funcs[&func];
-                let state = state.map(|v|v.into_iter().map(|s|s.lower(states)).collect());
-                let input = param.into_iter().flat_map(|ast|ast.lower(stmts, wire_count, funcs, states, wires)).collect();
-                stmts.push(Stmt { func, state, input, output })
-            },
-        }
-    }
-    fn lower(self, stmts: &mut Vec<Stmt>, wire_count: &mut usize, funcs: &Env<(usize, usize)>, states: &Env<usize>, wires: &Env<usize>) -> Vec<usize> {
-        match self {
-            hir::Ast::Source(b) => {
-                let output = *wire_count;
-                *wire_count += 1;
-                stmts.push(Stmt { func: 0, state: Some(vec![StateAst { negate: false, state: StateRef::Const(b) }]), input: vec![], output: vec![output] });
-                vec![output]
-            },
-            hir::Ast::Wire(i) => vec![wires[&i]],
-            hir::Ast::Call(func, state, param) => {
-                let (func, out) = funcs[&func];
-                let state = state.map(|v|v.into_iter().map(|s|s.lower(states)).collect());
-                let input = param.into_iter().flat_map(|ast|ast.lower(stmts, wire_count, funcs, states, wires)).collect();
-                let output = (*wire_count..*wire_count+out).collect::<Vec<_>>();
-                *wire_count += out;
-                stmts.push(Stmt { func, state, input, output: output.clone() });
-                output
-            },
-        }
-    }
-}
-
-impl hir::Stmt {
-    fn lower(self, stmts: &mut Vec<Stmt>, wire_count: &mut usize, funcs: &Env<(usize, usize)>, states: &Env<usize>, wires: &mut Env<usize>) {
-        match self {
-            hir::Stmt::Float(vec) => {
-                let count = vec.len();
-                wires.extend(vec.into_iter().zip(*wire_count..*wire_count+count));
-                *wire_count += count;
-            },
-            hir::Stmt::Let(vec, ast) => {
-                let count = vec.len();
-                let output = (*wire_count..*wire_count+count).collect::<Vec<_>>();
-                wires.extend(vec.into_iter().zip(&output).flat_map(|(s, w)|s.map(|s|(s, *w))));
-                *wire_count += count;
-                ast.lower_to(stmts, wire_count, output, funcs, states, wires);
-            },
-            hir::Stmt::Set(vec, ast) => {
-                let output = vec.into_iter().map(|o|o.map_or_else(||{
-                    let w = *wire_count;
-                    *wire_count += 1;
-                    w
-                }, |o|wires[&o])).collect();
-                ast.lower_to(stmts, wire_count, output, funcs, states, wires);
-            },
-            hir::Stmt::Call(ast) => {
-                ast.lower_to(stmts, wire_count, vec![], funcs, states, wires);
-            },
-        }
-    }
-}
-
-impl hir::Func {
-    fn lower(self, funcs: &mut Env<(usize, usize)>) -> Func {
-        match self {
-            hir::Func::Custom { state, input, output, stmts } => {
-                let (state, states) = state.into_iter().enumerate().map(|(i, (s, v))|(v, (s, i))).unzip();
-                let input_count = input.len();
-                let output_count = output.len();
-                let mut wire_count = input.len() + output.len();
-                let mut wires = input.into_iter().chain(output).enumerate().map(|(i, s)|(s, i)).collect();
-                let mut func_stmts = vec![];
-                stmts.into_iter().for_each(|stmt|stmt.lower(&mut func_stmts, &mut wire_count, funcs, &states, &mut wires));
-                Func::Custom {
-                    state,
-                    input: input_count,
-                    output: output_count,
-                    local: wire_count - input_count - output_count,
-                    stmts: func_stmts,
-                }
-            },
-            hir::Func::Buffer => Func::Buffer,
-            hir::Func::Inverter => Func::Inverter,
-            hir::Func::Or => Func::Or,
-            hir::Func::And => Func::And,
-            hir::Func::Nor => Func::Nor,
-            hir::Func::Nand => Func::Nand,
-            hir::Func::Bus => Func::Bus,
-            hir::Func::BusInput => Func::BusInput,
         }
     }
 }

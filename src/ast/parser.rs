@@ -119,7 +119,7 @@ impl Parse for (String, Func) {
     fn parse(pair: Pair) -> Self {
         let mut pairs = pair.into_inner();
         let name = pairs.next().map(String::parse).unwrap();
-        let func = Func::Custom {
+        let func = Func {
             state: pairs.next().map(<Vec<(String, bool)>>::parse).unwrap(),
             input: pairs.next().map(<Vec<String>>::parse).unwrap(),
             output: pairs.next().map(<Vec<String>>::parse).unwrap(),
