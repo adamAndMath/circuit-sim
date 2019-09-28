@@ -45,9 +45,9 @@ fn main() {
   let path = args.next().unwrap();
   let func_name = args.next().unwrap();
   let (funcs, env) = ast::mir::parse(&std::fs::read_to_string(path).unwrap()).unwrap_or_else(|e|panic!(e));
-  println!("{:#?}", env);
+  //println!("{:#?}", env);
   let mut circuit = funcs[env[&func_name].0].build_circuit(&funcs);
-  println!("{:#?}", circuit);
+  //println!("{:#?}", circuit);
   let mut state = circuit.new_state();
   for line in stdin().lock().lines().map(|l|l.unwrap()) {
     let args: Vec<&str> = line.split_whitespace().collect();
