@@ -1,56 +1,98 @@
+//1
 and3(a, b, c) -> o {
     o = and(and(a, b), c);
 }
-
 xor(a, b) -> o {
     o = and(nand(a, b), or(a, b));
 }
-
 xnor(a, b) -> o {
     o = or(and(a, b), nor(a, b));
 }
-
-rising_edge(i) -> o {
-    o = and(i, buffer(not(i)));
+select(i0, i1, s) -> o {
+    or(and(s, i0), and(not(s), i1));
 }
-
 bin_decode(i, e) -> (h, l) {
     h = and(e, i);
     l = and(e, not(i));
 }
-
-tri_state(bus, i, e) {
-    bus_input(bus, bin_decode(i, e));
-}
-
 sr_latch[b=0](s, r) -> (q, qn) {
     q = nor[b](r, qn);
     qn = nor[!b](s, q);
 }
-
+rising_edge(i) -> o {
+    o = and(i, buffer(not(i)));
+}
+//2
+tri_state(bus, i, e) {
+    bus_input(bus, bin_decode(i, e));
+}
 d_latch[b=0](d, e) -> (q, qn) {
     (q, qn) = sr_latch[b](bin_decode(d, e));
 }
-
 jk_latch[b=0](j, k, e) -> (q, qn) {
     (q, qn) = sr_latch[b](and3(e, j, qn), and3(e, k, q));
 }
-
-d_flip_flop[b=0](d, clk) -> (q, qn) {
-    (q, qn) = d_latch[b](d, rising_edge(clk));
-}
-
-jk_flip_flop[b=0](j, k, clk) -> (q, qn) {
-    (q, qn) = jk_latch[b](j, k, clk);
-}
-
 half_adder(a, b) -> (s, c) {
     s = xor(a, b);
     c = and(a, b);
 }
-
+inverter8(i0, i1, i2, i3, i4, i5, i6, i7, inv) -> (o0, o1, o2, o3, o4, o5, o6, o7) {
+    o0 = xor(i0, inv);
+    o1 = xor(i1, inv);
+    o2 = xor(i2, inv);
+    o3 = xor(i3, inv);
+    o4 = xor(i4, inv);
+    o5 = xor(i5, inv);
+    o6 = xor(i6, inv);
+    o7 = xor(i7, inv);
+}
+//3
+d_flip_flop[b=0](d, clk) -> (q, qn) {
+    (q, qn) = d_latch[b](d, rising_edge(clk));
+}
+jk_flip_flop[b=0](j, k, clk) -> (q, qn) {
+    (q, qn) = jk_latch[b](j, k, clk);
+}
 full_adder(a, b, c_in) -> (s, c_out) {
     let (sum, c0) = half_adder(a, b);
     s = xor(sum, c_in);
     c_out = or(c0, and(sum, c_in));
+}
+register8(i0, i1, i2, i3, i4, i5, i6, i7, load, clk) -> (o0, o1, o2, o3, o4, o5, o6, o7) {
+    let e = and(load, clk);
+    let (n0, n1, n2, n3, n4, n5, n6, n7);
+    (o0, n0) = d_latch(i0, e);
+    (o1, n1) = d_latch(i1, e);
+    (o2, n2) = d_latch(i2, e);
+    (o3, n3) = d_latch(i3, e);
+    (o4, n4) = d_latch(i4, e);
+    (o5, n5) = d_latch(i5, e);
+    (o6, n6) = d_latch(i6, e);
+    (o7, n7) = d_latch(i7, e);
+}
+tri_state8(bus0, bus1, bus2, bus3, bus4, bus5, bus6, bus7, i0, i1, i2, i3, i4, i5, i6, i7, e) {
+    tri_state(bus0, i0, e);
+    tri_state(bus1, i1, e);
+    tri_state(bus2, i2, e);
+    tri_state(bus3, i3, e);
+    tri_state(bus4, i4, e);
+    tri_state(bus5, i5, e);
+    tri_state(bus6, i6, e);
+    tri_state(bus7, i7, e);
+}
+//4
+full_adder8(a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7, c_in) -> (o0, o1, o2, o3, o4, o5, o6, o7, c_out) {
+    let (c0, c1, c2, c3, c4, c5, c6);
+    (o0, c0) = full_adder(a0, b0, c_in);
+    (o1, c1) = full_adder(a1, b1, c0);
+    (o2, c2) = full_adder(a2, b2, c1);
+    (o3, c3) = full_adder(a3, b3, c2);
+    (o4, c4) = full_adder(a4, b4, c3);
+    (o5, c5) = full_adder(a5, b5, c4);
+    (o6, c6) = full_adder(a6, b6, c5);
+    (o7, c_out) = full_adder(a7, b7, c6);
+}
+//5
+ALU(a0, a1, a2, a3, a4, a5, a6, a7, b0, b1, b2, b3, b4, b5, b6, b7, sign) -> (o0, o1, o2, o3, o4, o5, o6, o7) {
+    (o0, o1, o2, o3, o4, o5, o6, o7, _) = full_adder8(a0, a1, a2, a3, a4, a5, a6, a7, inverter8(b0, b1, b2, b3, b4, b5, b6, b7, sign), sign);
 }
