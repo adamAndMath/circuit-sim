@@ -1,4 +1,4 @@
-use super::{ StateAst, Ast, Stmt, Func };
+use super::hir::{ StateAst, Ast, Stmt, Func };
 use pest_derive::Parser;
 use pest::Parser;
 type Pair<'i> = pest::iterators::Pair<'i, Rule>;
