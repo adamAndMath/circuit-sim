@@ -9,7 +9,7 @@ xnor(a, b) -> o {
     o = or(and(a, b), nor(a, b));
 }
 select(i0, i1, s) -> o {
-    or(and(s, i0), and(not(s), i1));
+    o = or(and(s, i0), and(not(s), i1));
 }
 bin_decode(i, e) -> (h, l) {
     h = and(e, i);

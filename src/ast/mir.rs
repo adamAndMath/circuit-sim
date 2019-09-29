@@ -1,7 +1,6 @@
 use super::{ write_iter };
 use circuit_sim::circuit::{ Circuit, Builder };
 use circuit_sim::base::Component;
-use std::convert::TryInto;
 use std::fmt::{ self, Display, Formatter };
 
 pub enum StateRef {
@@ -14,36 +13,42 @@ pub struct StateAst {
     pub state: StateRef,
 }
 
-pub struct Stmt {
-    pub func: usize,
-    pub state: Vec<StateAst>,
-    pub input: Vec<usize>,
-    pub output: Vec<usize>,
+impl From<bool> for StateAst {
+    fn from(b: bool) -> Self {
+        StateAst {
+            negate: false,
+            state: StateRef::Const(b),
+        }
+    }
 }
 
-pub enum Func {
-    Custom {
-        state: usize,
-        input: usize,
-        output: usize,
-        local: usize,
-        stmts: Vec<Stmt>,
+pub enum Stmt {
+    Call {
+        func: usize,
+        state: Vec<StateAst>,
+        wires: Vec<usize>,
     },
-    Source,
-    Buffer,
-    Inverter,
-    Or,
-    And,
-    Nor,
-    Nand,
-    Bus,
-    BusInput,
+    Source(StateAst, usize),
+    Buffer(StateAst, usize, usize),
+    Inverter(StateAst, usize, usize),
+    Or(StateAst, usize, usize, usize),
+    And(StateAst, usize, usize, usize),
+    Nor(StateAst, usize, usize, usize),
+    Nand(StateAst, usize, usize, usize),
+    Bus(StateAst, usize),
+    BusInput(usize, usize, usize),
 }
 
 pub struct FuncSign {
     pub id: usize,
     pub state: Vec<bool>,
+    pub input: usize,
     pub output: usize,
+}
+
+pub struct Func {
+    pub local: usize,
+    pub stmts: Vec<Stmt>,
 }
 
 impl Display for StateAst {
@@ -60,35 +65,43 @@ impl Display for StateAst {
 
 impl Display for Stmt {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "(")?;
-        write_iter(f, &self.output, ", ")?;
-        write!(f, ") = {}[", self.func)?;
+        match self {
+            Stmt::Call { func, state, wires } => {
+                write!(f, "{}[", func)?;
+                write_iter(f, state, ", ")?;
+                write!(f, "](")?;
+                write_iter(f, wires, ", ")?;
+                write!(f, ");")
+            },
+            Stmt::Source(state, input) => write!(f, "source[{}]({});", state, input),
+            Stmt::Buffer(state, input, output) => write!(f, "{} = buffer[{}]({});", output, state, input),
+            Stmt::Inverter(state, input, output) => write!(f, "{} = not[{}]({});", output, state, input),
+            Stmt::Or(state, a, b, o) => write!(f, "{} = or[{}]({}, {});", o, state, a, b),
+            Stmt::And(state, a, b, o) => write!(f, "{} = and[{}]({}, {});", o, state, a, b),
+            Stmt::Nor(state, a, b, o) => write!(f, "{} = nor[{}]({}, {});", o, state, a, b),
+            Stmt::Nand(state, a, b, o) => write!(f, "{} = nand[{}]({}, {});", o, state, a, b),
+            Stmt::Bus(state, output) => write!(f, "{} = bus[{}]();", output, state),
+            Stmt::BusInput(bus, high, low) => write!(f, "bus_input({}, {}, {})", bus, high, low),
+        }
+    }
+}
+
+impl Display for FuncSign {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "[")?;
         write_iter(f, &self.state, ", ")?;
-        write!(f, "](")?;
-        write_iter(f, &self.input, ", ")?;
-        write!(f, ");")
+        write!(f, "]({}) -> ({})", self.input, self.output)
     }
 }
 
 impl Display for Func {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match self {
-            Func::Custom {
-                state,
-                input,
-                output,
-                local,
-                stmts,
-            } => {
-                writeln!(f, "[{}]({}) -> {} {{", state, input, output)?;
-                writeln!(f, "  local {};", local)?;
-                for stmt in stmts {
-                    writeln!(f, "  {}", stmt)?;
-                }
-                write!(f, "}}")
-            },
-            _ => Ok(()),
+        writeln!(f, "{{")?;
+        writeln!(f, "  local {};", self.local)?;
+        for stmt in &self.stmts {
+            writeln!(f, "  {}", stmt)?;
         }
+        write!(f, "}}")
     }
 }
 
@@ -102,123 +115,67 @@ impl StateAst {
 }
 
 impl Stmt {
-    fn build(&self, circuit: &mut Builder, funcs: &[Func], states: &[bool], wires: &[usize]) {
-        let state: Vec<_> = self.state.iter().map(|s|s.eval(states)).collect();
-        let input: Vec<_> = self.input.iter().map(|i|wires[*i]).collect();
-        let output: Vec<_> = self.output.iter().map(|o|wires[*o]).collect();
-        funcs[self.func].call(circuit, funcs, &state, &input, &output)
+    fn build(&self, circuit: &mut Builder, funcs: &[Func], states: &[bool], p_wires: &[usize]) {
+        match self {
+            Stmt::Call { func, state, wires } => {
+                let state: Vec<_> = state.iter().map(|s|s.eval(states)).collect();
+                let wires: Vec<_> = wires.iter().map(|i|p_wires[*i]).collect();
+                funcs[*func].call(circuit, funcs, &state, &wires)
+            },
+            Stmt::Source(state, output) => {
+                let state = state.eval(states);
+                circuit.place_component(p_wires[*output], Component::Source(state), state);
+            },
+            Stmt::Buffer(state, input, output) => {
+                circuit.place_component(p_wires[*output], Component::Buffer(p_wires[*input]), state.eval(states));
+            },
+            Stmt::Inverter(state, input, output) => {
+                circuit.place_component(p_wires[*output], Component::Inverter(p_wires[*input]), state.eval(states));
+            },
+            Stmt::Or(state, a, b, o) => {
+                circuit.place_component(p_wires[*o], Component::Or(p_wires[*a], p_wires[*b]), state.eval(states));
+            },
+            Stmt::And(state, a, b, o) => {
+                circuit.place_component(p_wires[*o], Component::And(p_wires[*a], p_wires[*b]), state.eval(states));
+            },
+            Stmt::Nor(state, a, b, o) => {
+                circuit.place_component(p_wires[*o], Component::Nor(p_wires[*a], p_wires[*b]), state.eval(states));
+            },
+            Stmt::Nand(state, a, b, o) => {
+                circuit.place_component(p_wires[*o], Component::Nand(p_wires[*a], p_wires[*b]), state.eval(states));
+            },
+            Stmt::Bus(state, output) => {
+                circuit.place_component(p_wires[*output], Component::Bus(vec![]), state.eval(states));
+            },
+            Stmt::BusInput(bus, a, b) => {
+                circuit.add_bus_input(p_wires[*bus], p_wires[*a], p_wires[*b]);
+            },
+        }
     }
 }
 
 impl Func {
-    pub fn input(&self) -> usize {
-        match self {
-            Func::Custom { input, .. } => *input,
-            Func::Buffer |
-            Func::Inverter => 1,
-            Func::Or |
-            Func::And |
-            Func::Nor |
-            Func::Nand => 2,
-            Func::Source |
-            Func::Bus => 0,
-            Func::BusInput => 3,
-        }
-    }
-    pub fn output(&self) -> usize {
-        match self {
-            Func::Custom { output, .. } => *output,
-            Func::Source |
-            Func::Buffer |
-            Func::Inverter |
-            Func::Or |
-            Func::And |
-            Func::Nor |
-            Func::Nand |
-            Func::Bus => 1,
-            Func::BusInput => 0,
-        }
-    }
-    fn call(&self, circuit: &mut Builder, funcs: &[Func], p_state: &[bool], p_input: &[usize], p_output: &[usize]) {
-        match self {
-            Func::Custom { local, stmts, .. } => {
-                let state = p_state;
-                let wires = p_input.iter()
-                    .chain(p_output)
-                    .copied()
-                    .chain(std::iter::repeat_with(||circuit.new_slot()).take(*local))
-                    .collect::<Vec<_>>();
-                stmts.iter().for_each(|stmt|stmt.build(circuit, funcs, state, &wires))
-            },
-            Func::Source => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let []: [usize; 0] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Source(state), state);
-            },
-            Func::Buffer => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let [input]: [usize; 1] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Buffer(input), state);
-            },
-            Func::Inverter => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let [input]: [usize; 1] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Inverter(input), state);
-            },
-            Func::Or => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let [a, b]: [usize; 2] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Or(a, b), state);
-            },
-            Func::And => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let [a, b]: [usize; 2] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::And(a, b), state);
-            },
-            Func::Nor => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let [a, b]: [usize; 2] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Nor(a, b), state);
-            },
-            Func::Nand => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let [a, b]: [usize; 2] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Nand(a, b), state);
-            },
-            Func::Bus => {
-                let [state]: [bool; 1] = p_state.try_into().unwrap();
-                let []: [usize; 0] = p_input.try_into().unwrap();
-                let [output]: [usize; 1] = p_output.try_into().unwrap();
-                circuit.place_component(output, Component::Bus(vec![]), state);
-            },
-            Func::BusInput => {
-                let []: [bool; 0] = p_state.try_into().unwrap();
-                let [bus, a, b]: [usize; 3] = p_input.try_into().unwrap();
-                let []: [usize; 0] = p_output.try_into().unwrap();
-                circuit.add_bus_input(bus, a, b);
-            },
-        }
+    fn call(&self, circuit: &mut Builder, funcs: &[Func], p_state: &[bool], p_wires: &[usize]) {
+        let state = p_state;
+        let wires = p_wires.iter().copied()
+            .chain(std::iter::repeat_with(||circuit.new_slot()).take(self.local))
+            .collect::<Vec<_>>();
+        self.stmts.iter().for_each(|stmt|stmt.build(circuit, funcs, state, &wires))
     }
     pub fn build_circuit(&self, funcs: &[Func], sign: &FuncSign) -> Circuit {
         let mut circuit = Circuit::builder();
-        let input: Vec<_> = std::iter::repeat_with(||{
+        let mut wires = Vec::with_capacity(sign.input + sign.output);
+        wires.extend(std::iter::repeat_with(||{
             let wire = circuit.new_slot();
             circuit.add_input(wire, false);
             wire
-        }).take(self.input()).collect();
-        let output: Vec<_> = std::iter::repeat_with(||{
+        }).take(sign.input));
+        wires.extend(std::iter::repeat_with(||{
             let wire = circuit.new_slot();
             circuit.add_output(wire);
             wire
-        }).take(self.output()).collect::<Vec<_>>();
-        self.call(&mut circuit, funcs, &sign.state, &input, &output);
+        }).take(sign.output));
+        self.call(&mut circuit, funcs, &sign.state, &wires);
         circuit.build()
     }
 }
