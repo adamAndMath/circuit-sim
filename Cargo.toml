@@ -5,6 +5,6 @@ authors = ["m"]
 edition = "2018"
 
 [dependencies]
-rand = "0.7.2"
+rand = "0.9.3"
 pest = "2.1"
 pest_derive = "2.1"
